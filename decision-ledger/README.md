@@ -76,21 +76,22 @@ cp .env.example .env
 docker-compose up -d dynamodb-local dynamodb-init
 ```
 
-### 3. Run API (using SAM CLI)
+### 3. Deploy Infrastructure (CDK)
 
 ```bash
-# Install AWS SAM CLI first: https://docs.aws.amazon.com/sam/
-sam local start-api
+cd infrastructure
+npm install
+cdk deploy --require-approval never
 ```
 
-### 4. Run Slack Bot (requires ngrok)
+### 4. Local Testing
 
 ```bash
-# Start ngrok for Slack webhook
-ngrok http 3000
+# Run Lambda locally with SAM CLI
+sam local start-api
 
-# In another terminal
-sam local invoke SlackBotFunction
+# For Slack testing, use ngrok
+ngrok http 3000
 ```
 
 ---
@@ -105,14 +106,17 @@ decision-ledger/
 ├── README.md                 # This file
 ├── docker-compose.yml        # Local development (DynamoDB Local)
 ├── .env.example              # Environment template
-├── template.yaml             # AWS SAM template (IaC)
 │
-├── services/
-│   ├── api/                  # REST API (Lambda functions)
-│   ├── processor/            # Claude extraction (Lambda)
-│   └── slack-bot/            # Slack integration (Lambda)
+├── infrastructure/           # AWS CDK (TypeScript)
+│   ├── bin/
+│   ├── lib/
+│   ├── package.json
+│   └── cdk.json
 │
-└── infrastructure/           # Additional IaC if needed
+└── services/
+    ├── api/                  # REST API (Lambda - Python)
+    ├── processor/            # Claude extraction (Lambda - Python)
+    └── slack-bot/            # Slack integration (Lambda - Python)
 ```
 
 ---

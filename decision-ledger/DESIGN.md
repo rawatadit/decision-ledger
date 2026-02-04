@@ -670,16 +670,35 @@ graph TB
 ### Local Development
 
 ```bash
-# Option 1: DynamoDB Local + SAM CLI
-docker-compose up -d dynamodb-local
+# Start DynamoDB Local
+docker-compose up -d dynamodb-local dynamodb-init
+
+# Option 1: Use SAM CLI for Lambda testing
 sam local start-api
 
-# Option 2: LocalStack (full AWS emulation)
-docker-compose up -d localstack
+# Option 2: Use LocalStack (full AWS emulation)
+docker-compose --profile localstack up -d
 
 # Slack testing requires ngrok
 ngrok http 3000
 ```
+
+### Infrastructure as Code (CDK)
+
+Using AWS CDK with TypeScript for infrastructure definitions.
+
+```bash
+cd infrastructure
+npm install
+cdk synth    # Generate CloudFormation
+cdk deploy   # Deploy to AWS
+```
+
+**Why CDK over SAM/Terraform:**
+- Type-safe infrastructure definitions
+- Reusable constructs and patterns
+- Native AWS integration
+- Single language for infra + Lambda code (if using TypeScript)
 
 ---
 
@@ -708,7 +727,7 @@ ngrok http 3000
 | Slack | slack-bolt + Lambda | Official SDK on serverless |
 | Email | SES + Lambda | Native email receiving |
 | Secrets | Secrets Manager | Secure credential storage |
-| IaC | AWS SAM or CDK | Infrastructure as code |
+| IaC | AWS CDK (TypeScript) | Infrastructure as code |
 | Agent | AWS Bedrock Agent | Native integration with Decision Ledger API |
 
 ### Cost Estimation (Serverless)
