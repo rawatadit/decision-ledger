@@ -227,12 +227,15 @@ erDiagram
     PROJECTS ||--o{ PROJECT_MEMBERS : has
     DECISIONS ||--o{ DECISION_PARTICIPANTS : involves
     DECISIONS ||--o{ DECISION_TAGS : tagged_with
+    DECISIONS ||--o| DECISIONS : supersedes
 
     PROJECTS {
         uuid id PK
         string name UK
         string description
         string[] slack_channels
+        boolean auto_confirm_meeting_decisions
+        string notification_channel
         timestamp created_at
         timestamp updated_at
     }
@@ -240,9 +243,11 @@ erDiagram
     DECISIONS {
         uuid id PK
         uuid project_id FK
+        uuid supersedes_id FK
         string summary
         string context
         string raw_content
+        string status
         string source_type
         string source_channel
         string source_url
@@ -283,6 +288,8 @@ erDiagram
 | `name` | VARCHAR(255) | Unique project name |
 | `description` | TEXT | Project description |
 | `slack_channels` | TEXT[] | Channels that map to this project |
+| `auto_confirm_meeting_decisions` | BOOLEAN | Auto-confirm decisions from meeting emails (default: false) |
+| `notification_channel` | VARCHAR(255) | Slack channel for notifications (future use) |
 | `created_at` | TIMESTAMP | Creation time |
 | `updated_at` | TIMESTAMP | Last update time |
 
@@ -294,6 +301,8 @@ erDiagram
 | `summary` | TEXT | LLM-extracted decision summary |
 | `context` | TEXT | Surrounding context/rationale |
 | `raw_content` | TEXT | Original message/email content |
+| `status` | VARCHAR(20) | 'pending', 'open', 'confirmed', 'superseded' |
+| `supersedes_id` | UUID | References decision this one replaces (nullable) |
 | `source_type` | VARCHAR(50) | 'slack', 'email', 'meeting', 'api' |
 | `source_channel` | VARCHAR(255) | Slack channel or email thread |
 | `source_url` | TEXT | Link to original message |
@@ -470,11 +479,11 @@ Action Items:
 | `GET` | `/projects/{id}/members` | List project members |
 | `POST` | `/projects/{id}/members` | Add project member |
 | `DELETE` | `/projects/{id}/members/{user_id}` | Remove member |
-| `GET` | `/decisions` | Query decisions |
+| `GET` | `/decisions` | Query decisions (excludes superseded by default) |
 | `POST` | `/decisions` | Create decision |
 | `GET` | `/decisions/{id}` | Get decision |
-| `PUT` | `/decisions/{id}` | Update decision |
 | `DELETE` | `/decisions/{id}` | Delete decision |
+| `GET` | `/decisions/{id}/history` | Get decision evolution chain |
 | `GET` | `/decisions/search` | Full-text search |
 
 ### Key Endpoint Details
@@ -488,10 +497,12 @@ Query decisions with filters.
 |-------|------|-------------|
 | `project_id` | UUID | Filter by project |
 | `author` | string | Filter by author |
+| `status` | string | Filter by status ('open', 'confirmed') |
 | `source_type` | string | Filter by source ('slack', 'meeting', 'email') |
 | `tags` | string[] | Filter by tags (any match) |
 | `date_from` | datetime | Filter by date range start |
 | `date_to` | datetime | Filter by date range end |
+| `include_superseded` | boolean | Include superseded decisions (default: false) |
 | `limit` | int | Max results (default 50) |
 | `offset` | int | Pagination offset |
 
@@ -503,6 +514,7 @@ Query decisions with filters.
       "id": "uuid",
       "summary": "We decided to use PostgreSQL",
       "context": "After evaluating options...",
+      "status": "confirmed",
       "project": {"id": "uuid", "name": "Backend Rewrite"},
       "source_type": "meeting",
       "source_timestamp": "2024-02-03T10:00:00Z",
@@ -511,7 +523,8 @@ Query decisions with filters.
       "participants": [
         {"name": "Alice", "role": "decider"},
         {"name": "Bob", "role": "approver"}
-      ]
+      ],
+      "supersedes_id": null
     }
   ],
   "total": 100,
