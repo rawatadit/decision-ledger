@@ -18,6 +18,10 @@
 8. [Security & Access Control](#security--access-control)
 9. [Infrastructure](#infrastructure)
 10. [Open Questions](#open-questions)
+11. [Appendix](#appendix)
+    - [Technology Decisions](#technology-decisions)
+    - [Tech Stack](#tech-stack-aws-native)
+    - [Cost Estimation](#cost-estimation-serverless)
 
 ---
 
@@ -37,7 +41,7 @@
 
 1. **Ingest** decisions from multiple sources (Slack bot, meeting summary emails, API)
 2. **Extract** structured data using Claude (summary, participants, tags, project)
-3. **Store** in PostgreSQL with full-text search
+3. **Store** in DynamoDB (with OpenSearch for full-text search in Phase 2)
 4. **Query** via REST API designed for AI agents (Bedrock, MCP, etc.)
 
 ---
@@ -112,7 +116,7 @@ sequenceDiagram
     participant Source as Source (Slack/Email)
     participant Ingestion as Ingestion Service
     participant Processor as Processing Service
-    participant DB as PostgreSQL
+    participant DB as DynamoDB
     participant Agent as AI Agent
 
     User->>Source: Makes a decision
@@ -172,11 +176,12 @@ graph TB
 
     subgraph "Processing Layer"
         PROC[Processing Service]
-        CLAUDE[Claude API]
+        BEDROCK_LLM[Bedrock Claude]
     end
 
     subgraph "Storage Layer"
-        PG[(PostgreSQL)]
+        DDB[(DynamoDB)]
+        SEARCH[(OpenSearch)]
     end
 
     subgraph "Query Layer"
@@ -185,7 +190,7 @@ graph TB
     end
 
     subgraph "Consumers"
-        BEDROCK[Bedrock Agents]
+        BEDROCK_AGENT[Bedrock Agents]
         MCP[MCP Clients]
         WEB[Web UI Future]
     end
@@ -194,13 +199,15 @@ graph TB
     EM --> PROC
     API_IN --> PROC
 
-    PROC <--> CLAUDE
-    PROC --> PG
+    PROC <--> BEDROCK_LLM
+    PROC --> DDB
 
-    PG --> API_OUT
+    DDB --> API_OUT
+    DDB -.-> SEARCH
+    SEARCH --> API_OUT
     API_OUT --> SPEC
 
-    SPEC --> BEDROCK
+    SPEC --> BEDROCK_AGENT
     SPEC --> MCP
     API_OUT --> WEB
 ```
@@ -714,6 +721,23 @@ cdk deploy   # Deploy to AWS
 ---
 
 ## Appendix
+
+### Technology Decisions
+
+Key technology choices and the rationale behind them.
+
+| Decision | Choice | Alternatives Considered | Rationale |
+|----------|--------|------------------------|-----------|
+| **Database** | DynamoDB | PostgreSQL (RDS), Aurora Serverless | Fully serverless with pay-per-request pricing. No connection pooling issues with Lambda. Single-digit ms latency. Native IAM integration eliminates credential management. |
+| **Full-Text Search** | OpenSearch Serverless | PostgreSQL full-text, Algolia, Elasticsearch | AWS-native, serverless, integrates with DynamoDB Streams. Deferred to Phase 2 - can use Claude for initial search. |
+| **Compute** | Lambda | ECS Fargate, EC2, App Runner | True serverless - scales to zero, pay-per-invocation. Perfect for event-driven workloads (Slack events, email triggers). |
+| **API** | API Gateway + Lambda | ALB + Fargate, AppSync | Serverless, built-in throttling/auth, auto-generates SDK. Native IAM auth for Bedrock Agents. |
+| **LLM** | Amazon Bedrock (Claude) | Anthropic API direct, OpenAI | AWS-native means IAM auth instead of API keys. No egress costs. Simpler secrets management. Same Claude models. |
+| **IaC** | AWS CDK (TypeScript) | SAM, Terraform, CloudFormation | Type-safe infrastructure definitions. Reusable constructs. Better IDE support. Single language possible for infra + code. |
+| **Email Ingestion** | SES | SendGrid, Mailgun, self-hosted | AWS-native, integrates directly with Lambda. No additional vendor. Supports receiving emails to custom domain. |
+| **Secrets** | Secrets Manager | Parameter Store, HashiCorp Vault | Native Lambda integration with caching. Automatic rotation support. Fine-grained IAM policies. |
+| **Slack SDK** | slack-bolt (Python) | Slack SDK (raw), Node.js bolt | Official SDK with built-in best practices. Handles verification, retries, rate limiting. Python matches our Lambda runtime. |
+| **Agent Integration** | Bedrock Agent | Custom agent, LangChain | Native AWS service. Direct API Gateway integration. No additional infrastructure needed. |
 
 ### Tech Stack (AWS-Native)
 
