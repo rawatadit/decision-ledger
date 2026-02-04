@@ -1,17 +1,56 @@
 # Decision Ledger
 
-A knowledge base for capturing project decisions from Slack, processing them with Claude to extract structured information, and making them queryable by AI agents.
+> A unified knowledge base that aggregates project decisions from multiple sources and makes them queryable by AI agents.
 
-## Features
+---
 
-- **Slack Integration**: Tag `@DecisionLedger` in any message or thread to capture a decision
-- **AI-Powered Extraction**: Claude extracts decision summaries, participants, and tags
-- **Project Organization**: Decisions are automatically associated with projects
-- **Agent-Friendly API**: REST API designed for consumption by AI agents (Bedrock, MCP, etc.)
+## The Problem
 
-## Architecture
+Decisions are made everywhere—Slack threads, meetings, emails—but queryable nowhere. When someone asks "what did we decide about X?", the answer is buried across multiple tools.
 
-See [DESIGN.md](./DESIGN.md) for detailed architecture documentation.
+## The Solution
+
+Decision Ledger aggregates decisions from all sources into a single, searchable knowledge base with an AI-agent-friendly API.
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Slack Bot      │     │  Meeting Bot    │     │  Direct API     │
+│  @DecisionLedger│     │  Email Summary  │     │                 │
+└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 ▼
+                    ┌────────────────────────┐
+                    │    Decision Ledger     │
+                    │  ┌──────────────────┐  │
+                    │  │ Claude Extraction│  │
+                    │  └──────────────────┘  │
+                    │  ┌──────────────────┐  │
+                    │  │ PostgreSQL Store │  │
+                    │  └──────────────────┘  │
+                    │  ┌──────────────────┐  │
+                    │  │   REST API       │  │
+                    │  └──────────────────┘  │
+                    └───────────┬────────────┘
+                                │
+              ┌─────────────────┼─────────────────┐
+              ▼                 ▼                 ▼
+        ┌───────────┐    ┌───────────┐    ┌───────────┐
+        │  Bedrock  │    │    MCP    │    │  Web UI   │
+        │  Agents   │    │  Clients  │    │ (Future)  │
+        └───────────┘    └───────────┘    └───────────┘
+```
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [DESIGN.md](./DESIGN.md) | Technical architecture and design decisions |
+| [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) | Phased implementation plan with tasks |
+
+---
 
 ## Quick Start
 
@@ -19,108 +58,103 @@ See [DESIGN.md](./DESIGN.md) for detailed architecture documentation.
 
 - Python 3.11+
 - Docker and Docker Compose
-- Slack workspace with admin access (for bot setup)
+- Slack workspace with admin access
 - Anthropic API key
 
-### Local Development
+### 1. Clone and Configure
 
-1. **Clone and setup environment**:
-   ```bash
-   cd decision-ledger
-   cp .env.example .env
-   # Edit .env with your credentials
-   ```
+```bash
+cd decision-ledger
+cp .env.example .env
+# Edit .env with your credentials
+```
 
-2. **Start the database**:
-   ```bash
-   docker-compose up -d postgres
-   ```
+### 2. Start Database
 
-3. **Run database migrations**:
-   ```bash
-   docker-compose exec postgres psql -U postgres -d decision_ledger -f /docker-entrypoint-initdb.d/001_initial_schema.sql
-   ```
+```bash
+docker-compose up -d postgres
+```
 
-4. **Start the API service**:
-   ```bash
-   cd services/api
-   pip install -r requirements.txt
-   uvicorn src.main:app --reload --port 8000
-   ```
+### 3. Run API
 
-5. **Start the Slack bot** (requires ngrok for local development):
-   ```bash
-   cd services/slack-bot
-   pip install -r requirements.txt
-   python src/app.py
-   ```
+```bash
+cd services/api
+pip install -r requirements.txt
+uvicorn src.main:app --reload --port 8000
+```
 
-### Slack App Setup
+### 4. Run Slack Bot (requires ngrok)
 
-1. Create a new Slack App at https://api.slack.com/apps
-2. Add the following OAuth scopes:
-   - `app_mentions:read`
-   - `channels:history`
-   - `chat:write`
-   - `reactions:write`
-3. Enable Event Subscriptions and subscribe to `app_mention` events
-4. Install the app to your workspace
-5. Copy the Bot Token and Signing Secret to your `.env` file
+```bash
+cd services/slack-bot
+pip install -r requirements.txt
+python src/app.py
+```
+
+---
 
 ## Project Structure
 
 ```
 decision-ledger/
-├── DESIGN.md                    # Architecture documentation
-├── README.md                    # This file
-├── docker-compose.yml           # Local development environment
-├── .env.example                 # Environment variables template
-├── .gitignore
+├── DESIGN.md                 # Architecture documentation
+├── IMPLEMENTATION_PLAN.md    # Detailed implementation plan
+├── README.md                 # This file
+├── docker-compose.yml        # Local development setup
+├── .env.example              # Environment template
 │
 ├── database/
-│   └── migrations/
-│       └── 001_initial_schema.sql
+│   └── migrations/           # SQL schema files
 │
-├── services/
-│   ├── api/                     # Core API service
-│   │   ├── Dockerfile
-│   │   ├── requirements.txt
-│   │   └── src/
-│   │       ├── main.py
-│   │       ├── models/
-│   │       ├── routes/
-│   │       └── db/
-│   │
-│   ├── processor/               # Claude extraction service
-│   │   ├── requirements.txt
-│   │   └── src/
-│   │       ├── extractor.py
-│   │       └── prompts.py
-│   │
-│   └── slack-bot/               # Slack integration
-│       ├── requirements.txt
-│       └── src/
-│           ├── app.py
-│           └── handlers/
-│
-└── infrastructure/              # AWS CDK or Terraform (Phase 6)
-    └── ...
+└── services/
+    ├── api/                  # REST API (FastAPI)
+    ├── processor/            # Claude extraction service
+    └── slack-bot/            # Slack integration
 ```
 
-## API Endpoints
+---
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check |
-| `/projects` | GET | List all projects |
-| `/projects` | POST | Create new project |
-| `/projects/{id}` | GET | Get project details |
-| `/projects/{id}/decisions` | GET | List decisions for a project |
-| `/projects/{id}/members` | GET/POST | Manage project members |
-| `/decisions` | GET | Query decisions with filters |
-| `/decisions` | POST | Create new decision |
-| `/decisions/{id}` | GET | Get decision details |
-| `/decisions/search` | GET | Full-text search |
+## How It Works
+
+### 1. Slack Capture
+
+```
+User: "Let's go with PostgreSQL for the new service @DecisionLedger"
+
+Bot: ✓ Decision logged to **Backend Rewrite**
+     Summary: Use PostgreSQL for the new service
+     [View] [Edit Project]
+```
+
+### 2. Meeting Email Ingestion
+
+Meeting bot sends summary email → Decision Ledger extracts "Key Decisions" section → Each decision stored with meeting context.
+
+### 3. Query via Agent
+
+```
+Human: "What database decisions have we made for the backend rewrite?"
+
+Agent: Based on the Decision Ledger, you decided on 2024-02-01 to use
+       PostgreSQL for the new service. The decision was made by Alice
+       with Bob's approval, citing better full-text search support.
+```
+
+---
+
+## API Overview
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /projects` | List all projects |
+| `GET /projects/{id}/decisions` | Get project decisions |
+| `GET /decisions` | Query with filters |
+| `GET /decisions/search?q=` | Full-text search |
+| `POST /decisions` | Create decision |
+
+Full API docs available at `/docs` when running.
+
+---
 
 ## Environment Variables
 
@@ -128,9 +162,10 @@ decision-ledger/
 |----------|-------------|
 | `DATABASE_URL` | PostgreSQL connection string |
 | `ANTHROPIC_API_KEY` | Claude API key |
-| `SLACK_BOT_TOKEN` | Slack Bot OAuth token |
+| `SLACK_BOT_TOKEN` | Slack bot OAuth token |
 | `SLACK_SIGNING_SECRET` | Slack app signing secret |
-| `API_BASE_URL` | Base URL for the API service |
+
+---
 
 ## License
 
