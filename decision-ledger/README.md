@@ -47,6 +47,7 @@ Decision Ledger aggregates decisions from all sources into a single, searchable 
 
 | Document | Description |
 |----------|-------------|
+| [USER_STORIES.md](./USER_STORIES.md) | Product requirements and user stories |
 | [DESIGN.md](./DESIGN.md) | Technical architecture and design decisions |
 | [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) | Phased implementation plan with tasks |
 
