@@ -70,26 +70,27 @@ cp .env.example .env
 # Edit .env with your credentials
 ```
 
-### 2. Start Database
+### 2. Start DynamoDB Local
 
 ```bash
-docker-compose up -d postgres
+docker-compose up -d dynamodb-local dynamodb-init
 ```
 
-### 3. Run API
+### 3. Run API (using SAM CLI)
 
 ```bash
-cd services/api
-pip install -r requirements.txt
-uvicorn src.main:app --reload --port 8000
+# Install AWS SAM CLI first: https://docs.aws.amazon.com/sam/
+sam local start-api
 ```
 
 ### 4. Run Slack Bot (requires ngrok)
 
 ```bash
-cd services/slack-bot
-pip install -r requirements.txt
-python src/app.py
+# Start ngrok for Slack webhook
+ngrok http 3000
+
+# In another terminal
+sam local invoke SlackBotFunction
 ```
 
 ---
@@ -100,17 +101,18 @@ python src/app.py
 decision-ledger/
 ├── DESIGN.md                 # Architecture documentation
 ├── IMPLEMENTATION_PLAN.md    # Detailed implementation plan
+├── USER_STORIES.md           # Product requirements
 ├── README.md                 # This file
-├── docker-compose.yml        # Local development setup
+├── docker-compose.yml        # Local development (DynamoDB Local)
 ├── .env.example              # Environment template
+├── template.yaml             # AWS SAM template (IaC)
 │
-├── database/
-│   └── migrations/           # SQL schema files
+├── services/
+│   ├── api/                  # REST API (Lambda functions)
+│   ├── processor/            # Claude extraction (Lambda)
+│   └── slack-bot/            # Slack integration (Lambda)
 │
-└── services/
-    ├── api/                  # REST API (FastAPI)
-    ├── processor/            # Claude extraction service
-    └── slack-bot/            # Slack integration
+└── infrastructure/           # Additional IaC if needed
 ```
 
 ---
@@ -161,10 +163,12 @@ Full API docs available at `/docs` when running.
 
 | Variable | Description |
 |----------|-------------|
-| `DATABASE_URL` | PostgreSQL connection string |
-| `ANTHROPIC_API_KEY` | Claude API key |
+| `AWS_REGION` | AWS region (e.g., us-east-1) |
+| `DYNAMODB_TABLE_NAME` | DynamoDB table name |
 | `SLACK_BOT_TOKEN` | Slack bot OAuth token |
 | `SLACK_SIGNING_SECRET` | Slack app signing secret |
+| `MEETING_BOT_SENDER` | Email address of meeting bot |
+| `BEDROCK_MODEL_ID` | Amazon Bedrock model ID for Claude |
 
 ---
 

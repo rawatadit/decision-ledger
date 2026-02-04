@@ -209,131 +209,163 @@ graph TB
 
 | Component | Purpose | Technology |
 |-----------|---------|------------|
-| **Slack Bot** | Capture decisions from Slack mentions | Python, slack-bolt |
-| **Email Processor** | Ingest meeting bot summaries | Python, AWS SES |
-| **Processing Service** | Extract structure using Claude | Python, Anthropic SDK |
-| **REST API** | CRUD + Query endpoints | Python, FastAPI |
-| **Database** | Persistent storage | PostgreSQL |
+| **Slack Bot** | Capture decisions from Slack mentions | Python, slack-bolt, Lambda |
+| **Email Processor** | Ingest meeting bot summaries | Lambda, AWS SES |
+| **Processing Service** | Extract structure using Claude | Lambda, Bedrock/Anthropic SDK |
+| **REST API** | CRUD + Query endpoints | API Gateway, Lambda |
+| **Database** | Persistent storage | DynamoDB |
+| **Search** | Full-text search (Phase 2) | OpenSearch Serverless |
 
 ---
 
 ## Data Model
 
-### Entity Relationship Diagram
+### Database Choice: DynamoDB
 
-```mermaid
-erDiagram
-    PROJECTS ||--o{ DECISIONS : contains
-    PROJECTS ||--o{ PROJECT_MEMBERS : has
-    DECISIONS ||--o{ DECISION_PARTICIPANTS : involves
-    DECISIONS ||--o{ DECISION_TAGS : tagged_with
-    DECISIONS ||--o| DECISIONS : supersedes
+**Decision:** Use Amazon DynamoDB instead of PostgreSQL.
 
-    PROJECTS {
-        uuid id PK
-        string name UK
-        string description
-        string[] slack_channels
-        boolean auto_confirm_meeting_decisions
-        string notification_channel
-        timestamp created_at
-        timestamp updated_at
-    }
+**Rationale:**
+- Fully serverless - no capacity management, automatic scaling
+- Pay-per-request pricing - cost-effective for variable workloads
+- Native AWS integration - seamless IAM, Lambda, API Gateway integration
+- Single-digit millisecond latency at any scale
+- No connection pooling complexity
 
-    DECISIONS {
-        uuid id PK
-        uuid project_id FK
-        uuid supersedes_id FK
-        string summary
-        string context
-        string raw_content
-        string status
-        string source_type
-        string source_channel
-        string source_url
-        timestamp source_timestamp
-        string author
-        timestamp created_at
-        timestamp updated_at
-    }
+**Trade-offs accepted:**
+- Denormalized data model (duplicated data for query efficiency)
+- Access patterns must be designed upfront
+- Full-text search requires OpenSearch Serverless integration
+- No joins - multiple queries or denormalization required
 
-    DECISION_PARTICIPANTS {
-        uuid id PK
-        uuid decision_id FK
-        string participant_name
-        string participant_role
-    }
+### Access Patterns
 
-    DECISION_TAGS {
-        uuid id PK
-        uuid decision_id FK
-        string tag
-    }
+DynamoDB requires designing for access patterns first. Here are our primary patterns:
 
-    PROJECT_MEMBERS {
-        uuid id PK
-        uuid project_id FK
-        string user_id
-        string role
-        timestamp created_at
-    }
+| # | Access Pattern | Key Design |
+|---|----------------|------------|
+| AP1 | Get project by ID | PK=`PROJECT#<id>` |
+| AP2 | List user's projects | GSI1: `user_id` → projects |
+| AP3 | Get decision by ID | PK=`DECISION#<id>` |
+| AP4 | List decisions by project | GSI2: `project_id`, SK=`created_at` |
+| AP5 | List decisions by status | GSI3: `status`, SK=`created_at` |
+| AP6 | Get decision history chain | Query by `supersedes_id` |
+| AP7 | Search decisions by text | OpenSearch Serverless |
+| AP8 | List project members | PK=`PROJECT#<id>`, SK=`MEMBER#<user_id>` |
+| AP9 | Check user membership | GSI1: `user_id` |
+
+### Table Design (Single-Table)
+
+Using single-table design for efficient queries and reduced costs.
+
+**Table Name:** `decision-ledger`
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PK                    │ SK                  │ Attributes                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ PROJECT#<id>          │ METADATA            │ name, description, settings   │
+│ PROJECT#<id>          │ MEMBER#<user_id>    │ role, joined_at               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ DECISION#<id>         │ METADATA            │ summary, status, project_id   │
+│ DECISION#<id>         │ PARTICIPANT#<name>  │ role                          │
+│ DECISION#<id>         │ TAG#<tag>           │ (tag stored in SK)            │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Table Definitions
+### Global Secondary Indexes (GSIs)
 
-#### `projects`
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `name` | VARCHAR(255) | Unique project name |
-| `description` | TEXT | Project description |
-| `slack_channels` | TEXT[] | Channels that map to this project |
-| `auto_confirm_meeting_decisions` | BOOLEAN | Auto-confirm decisions from meeting emails (default: false) |
-| `notification_channel` | VARCHAR(255) | Slack channel for notifications (future use) |
-| `created_at` | TIMESTAMP | Creation time |
-| `updated_at` | TIMESTAMP | Last update time |
+| GSI | Partition Key | Sort Key | Purpose |
+|-----|---------------|----------|---------|
+| GSI1 | `user_id` | `entity_type` | List user's project memberships |
+| GSI2 | `project_id` | `created_at` | List decisions by project |
+| GSI3 | `gsi3_pk` (status#project) | `created_at` | Filter by status within project |
+| GSI4 | `supersedes_id` | - | Find superseding decision |
 
-#### `decisions`
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `project_id` | UUID | Foreign key to projects |
-| `summary` | TEXT | LLM-extracted decision summary |
-| `context` | TEXT | Surrounding context/rationale |
-| `raw_content` | TEXT | Original message/email content |
-| `status` | VARCHAR(20) | 'pending', 'open', 'confirmed', 'superseded' |
-| `supersedes_id` | UUID | References decision this one replaces (nullable) |
-| `source_type` | VARCHAR(50) | 'slack', 'email', 'meeting', 'api' |
-| `source_channel` | VARCHAR(255) | Slack channel or email thread |
-| `source_url` | TEXT | Link to original message |
-| `source_timestamp` | TIMESTAMP | When decision was made |
-| `author` | VARCHAR(255) | Who logged the decision |
-| `created_at` | TIMESTAMP | Creation time |
-| `updated_at` | TIMESTAMP | Last update time |
+### Entity Schemas
 
-#### `decision_participants`
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `decision_id` | UUID | Foreign key to decisions |
-| `participant_name` | VARCHAR(255) | Name of participant |
-| `participant_role` | VARCHAR(100) | 'decider', 'approver', 'contributor' |
+#### Project Entity
+```json
+{
+  "PK": "PROJECT#<uuid>",
+  "SK": "METADATA",
+  "entity_type": "PROJECT",
+  "id": "<uuid>",
+  "name": "Backend Rewrite",
+  "description": "Project description",
+  "slack_channels": ["#backend", "#engineering"],
+  "auto_confirm_meeting_decisions": false,
+  "notification_channel": "#backend-decisions",
+  "created_at": "2024-02-03T10:00:00Z",
+  "updated_at": "2024-02-03T10:00:00Z"
+}
+```
 
-#### `decision_tags`
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `decision_id` | UUID | Foreign key to decisions |
-| `tag` | VARCHAR(100) | Tag value |
+#### Project Member Entity
+```json
+{
+  "PK": "PROJECT#<project_uuid>",
+  "SK": "MEMBER#<user_id>",
+  "entity_type": "PROJECT_MEMBER",
+  "user_id": "U12345678",
+  "project_id": "<project_uuid>",
+  "role": "admin",
+  "created_at": "2024-02-03T10:00:00Z"
+}
+```
 
-#### `project_members`
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `project_id` | UUID | Foreign key to projects |
-| `user_id` | VARCHAR(255) | User identifier (Slack ID, IAM ARN) |
-| `role` | VARCHAR(50) | 'admin', 'member', 'viewer' |
-| `created_at` | TIMESTAMP | Creation time |
+#### Decision Entity
+```json
+{
+  "PK": "DECISION#<uuid>",
+  "SK": "METADATA",
+  "entity_type": "DECISION",
+  "id": "<uuid>",
+  "project_id": "<project_uuid>",
+  "summary": "Use PostgreSQL for the new service",
+  "context": "After evaluating MongoDB and PostgreSQL...",
+  "raw_content": "Original slack message or email content",
+  "status": "confirmed",
+  "supersedes_id": null,
+  "source_type": "slack",
+  "source_channel": "#backend",
+  "source_url": "https://slack.com/archives/...",
+  "source_timestamp": "2024-02-03T09:30:00Z",
+  "author": "U12345678",
+  "participants": [
+    {"name": "Alice", "role": "decider"},
+    {"name": "Bob", "role": "approver"}
+  ],
+  "tags": ["database", "infrastructure"],
+  "created_at": "2024-02-03T10:00:00Z",
+  "updated_at": "2024-02-03T10:00:00Z",
+  "gsi3_pk": "confirmed#<project_uuid>"
+}
+```
+
+**Note:** Participants and tags are embedded in the decision document for read efficiency. For large numbers of participants/tags, separate items could be used.
+
+### Full-Text Search: OpenSearch Serverless
+
+DynamoDB doesn't support full-text search natively. For the `/decisions/search` endpoint:
+
+```mermaid
+graph LR
+    A[Decision Created] --> B[DynamoDB Stream]
+    B --> C[Lambda]
+    C --> D[OpenSearch Serverless]
+
+    E[Search Query] --> D
+    D --> F[Decision IDs]
+    F --> G[DynamoDB GetItem]
+```
+
+**Implementation:**
+1. DynamoDB Streams triggers Lambda on decision changes
+2. Lambda indexes decision summary + context in OpenSearch
+3. Search queries hit OpenSearch, return decision IDs
+4. Full decision fetched from DynamoDB
+
+**Alternative (simpler, Phase 1):** Skip OpenSearch, use Claude to search through filtered results. Add OpenSearch in Phase 2 if needed.
 
 ---
 
@@ -578,52 +610,75 @@ flowchart TD
 
 ## Infrastructure
 
-### AWS Architecture
+### AWS Architecture (Serverless)
 
 ```mermaid
 graph TB
-    subgraph "Public"
+    subgraph "External"
         SLACK[Slack Events]
-        SES[AWS SES]
+        SES_IN[Incoming Email]
     end
 
-    subgraph "AWS VPC"
-        subgraph "Public Subnet"
-            ALB[Application Load Balancer]
-            APIGW[API Gateway]
-        end
+    subgraph "AWS Serverless"
+        APIGW[API Gateway]
+        LAMBDA_API[Lambda - API]
+        LAMBDA_SLACK[Lambda - Slack Bot]
+        LAMBDA_EMAIL[Lambda - Email Processor]
+        LAMBDA_PROCESS[Lambda - Processing]
+    end
 
-        subgraph "Private Subnet"
-            ECS[ECS Fargate]
-            LAMBDA[Lambda - Email]
-        end
-
-        subgraph "Data Subnet"
-            RDS[(RDS PostgreSQL)]
-        end
+    subgraph "Data Layer"
+        DDB[(DynamoDB)]
+        OPENSEARCH[(OpenSearch Serverless)]
     end
 
     subgraph "AWS Services"
         SECRETS[Secrets Manager]
         BEDROCK[Bedrock Agent]
+        SES[SES - Email Receiving]
+        STREAMS[DynamoDB Streams]
     end
 
     SLACK --> APIGW
-    SES --> LAMBDA
-    APIGW --> ALB
-    ALB --> ECS
-    LAMBDA --> ECS
-    ECS --> RDS
-    ECS --> SECRETS
+    APIGW --> LAMBDA_SLACK
+    APIGW --> LAMBDA_API
+
+    SES_IN --> SES
+    SES --> LAMBDA_EMAIL
+
+    LAMBDA_SLACK --> LAMBDA_PROCESS
+    LAMBDA_EMAIL --> LAMBDA_PROCESS
+    LAMBDA_API --> DDB
+    LAMBDA_PROCESS --> DDB
+
+    STREAMS --> OPENSEARCH
+
     BEDROCK --> APIGW
+    LAMBDA_API --> SECRETS
+    LAMBDA_PROCESS --> SECRETS
 ```
+
+### Why Serverless?
+
+| Aspect | Benefit |
+|--------|---------|
+| **Cost** | Pay only for actual usage, no idle costs |
+| **Scale** | Automatic scaling from 0 to thousands of requests |
+| **Operations** | No servers to manage, patch, or monitor |
+| **Integration** | Native AWS service integration via IAM |
 
 ### Local Development
 
 ```bash
-docker-compose up
-# Starts: PostgreSQL, API service, Slack bot
-# Use ngrok for Slack webhook URL
+# Option 1: DynamoDB Local + SAM CLI
+docker-compose up -d dynamodb-local
+sam local start-api
+
+# Option 2: LocalStack (full AWS emulation)
+docker-compose up -d localstack
+
+# Slack testing requires ngrok
+ngrok http 3000
 ```
 
 ---
@@ -641,14 +696,29 @@ docker-compose up
 
 ## Appendix
 
-### Tech Stack
+### Tech Stack (AWS-Native)
 
 | Component | Technology | Rationale |
 |-----------|------------|-----------|
 | Language | Python 3.11+ | Team familiarity, good LLM libraries |
-| API | FastAPI | Async, auto OpenAPI, fast |
-| Database | PostgreSQL | Reliable, full-text search, arrays |
-| LLM | Claude (Anthropic) | Best at structured extraction |
-| Slack | slack-bolt | Official SDK, well documented |
-| Deployment | AWS ECS Fargate | Serverless containers, scales |
-| Agent | AWS Bedrock | Native AWS integration |
+| API | API Gateway + Lambda | Serverless, auto-scaling, pay-per-request |
+| Database | DynamoDB | Serverless, single-digit ms latency, scales infinitely |
+| Search | OpenSearch Serverless | Full-text search (Phase 2) |
+| LLM | Amazon Bedrock (Claude) | AWS-native, no API key management |
+| Slack | slack-bolt + Lambda | Official SDK on serverless |
+| Email | SES + Lambda | Native email receiving |
+| Secrets | Secrets Manager | Secure credential storage |
+| IaC | AWS SAM or CDK | Infrastructure as code |
+| Agent | AWS Bedrock Agent | Native integration with Decision Ledger API |
+
+### Cost Estimation (Serverless)
+
+| Service | Pricing Model | Estimated Monthly* |
+|---------|---------------|-------------------|
+| DynamoDB | Per request + storage | $5-20 |
+| Lambda | Per invocation + duration | $5-15 |
+| API Gateway | Per request | $3-10 |
+| Bedrock (Claude) | Per token | Usage-based |
+| Secrets Manager | Per secret + API calls | $1-2 |
+
+*Estimates for low-medium usage (~10K decisions/month)
