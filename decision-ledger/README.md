@@ -23,13 +23,13 @@ Decision Ledger aggregates decisions from all sources into a single, searchable 
                     ┌────────────────────────┐
                     │    Decision Ledger     │
                     │  ┌──────────────────┐  │
-                    │  │ Claude Extraction│  │
+                    │  │ Bedrock Claude   │  │
                     │  └──────────────────┘  │
                     │  ┌──────────────────┐  │
-                    │  │ PostgreSQL Store │  │
+                    │  │ DynamoDB Store   │  │
                     │  └──────────────────┘  │
                     │  ┌──────────────────┐  │
-                    │  │   REST API       │  │
+                    │  │ API Gateway      │  │
                     │  └──────────────────┘  │
                     └───────────┬────────────┘
                                 │
