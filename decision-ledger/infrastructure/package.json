@@ -1,0 +1,33 @@
+{
+  "name": "decision-ledger-infrastructure",
+  "version": "1.0.0",
+  "description": "AWS CDK infrastructure for Decision Ledger",
+  "main": "bin/decision-ledger.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "cdk": "cdk",
+    "synth": "cdk synth",
+    "deploy": "cdk deploy",
+    "deploy:dev": "cdk deploy --context env=dev",
+    "deploy:prod": "cdk deploy --context env=prod",
+    "diff": "cdk diff",
+    "destroy": "cdk destroy"
+  },
+  "keywords": [
+    "aws",
+    "cdk",
+    "dynamodb",
+    "serverless"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@types/node": "^25.2.0",
+    "aws-cdk-lib": "^2.237.1",
+    "constructs": "^10.4.5",
+    "source-map-support": "^0.5.21",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
